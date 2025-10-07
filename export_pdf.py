@@ -234,18 +234,19 @@ def export_to_pdf(scrollable_frame: tk.Frame, output_path: str = "document.pdf",
                     ('TOPPADDING', (0, 0), (-1, -1), 5),
                 ]))
 
-            # --- Raíz ---
-                        # --- Raíz ---
+            # --- Raíz (tabla totalmente en blanco, sin bordes) ---
             elif is_raiz:
+                num_rows = len(table_data)
+                num_cols = len(table_data[0])
+                
+                # Tabla completamente en blanco
                 table_data_blank = [['' for _ in range(num_cols)] for _ in range(num_rows)]
+                
                 table = Table(table_data_blank, colWidths=[usable_width / num_cols] * num_cols, hAlign='CENTER')
                 table.setStyle(TableStyle([
                     # Quitar todos los bordes
                     ('BOX', (0, 0), (-1, -1), 0, colors.white),
                     ('GRID', (0, 0), (-1, -1), 0, colors.white),
-            
-                    # Solo borde derecho de la celda (0,0)
-                    ('LINEAFTER', (0, 0), (0, 0), 1.2, colors.black),
             
                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                     ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
@@ -254,8 +255,9 @@ def export_to_pdf(scrollable_frame: tk.Frame, output_path: str = "document.pdf",
                     ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
                     ('TOPPADDING', (0, 0), (-1, -1), 5),
                 ]))
-            
-            
+
+
+
             # --- Tablas normales ---
             else:
                 table = Table(table_data, colWidths=[usable_width / num_cols] * num_cols, hAlign='CENTER')
