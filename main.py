@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 from bloques import agregar_bloque_texto, mover_botones_abajo
 from submenu import abrir_submenu
 from export_pdf import export_to_pdf  # ✅ Import correcto
@@ -69,6 +69,7 @@ canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
 
 # ---- Función para exportar a PDF ----
 def exportar_pdf():
+    """Solicita ruta de destino, pregunta por título opcional y exporta a PDF."""
     archivo_destino = filedialog.asksaveasfilename(
         defaultextension=".pdf",
         filetypes=[("Archivos PDF", "*.pdf")],
@@ -78,7 +79,24 @@ def exportar_pdf():
         return
 
     try:
-        export_to_pdf(scrollable_frame, archivo_destino, title="Mi documento QuicKual")
+        # 1) Preguntar si desea añadir título
+        resp = messagebox.askyesno(
+            "Título del documento",
+            "¿Deseas poner título al documento?"
+        )
+        titulo = None
+        if resp:
+            # 2) Preguntar el título si dijo que sí
+            titulo = simpledialog.askstring(
+                "Título del documento",
+                "¿Cuál es el título de tu documento?",
+                parent=root
+            )
+            if titulo is not None:
+                titulo = titulo.strip() or None
+
+        # 3) Exportar con el título proporcionado (o sin título si None)
+        export_to_pdf(scrollable_frame, archivo_destino, title=titulo)
         messagebox.showinfo(
             "Exportar a PDF",
             f"El documento se ha exportado correctamente como:\n{archivo_destino}"
@@ -101,5 +119,5 @@ export_btn = tk.Button(
 )
 export_btn.pack(anchor="center", pady=8)
 
-# ------------------------------------------------------------------------------------
+# ----
 root.mainloop()
