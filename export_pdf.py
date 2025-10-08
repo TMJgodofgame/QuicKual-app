@@ -75,6 +75,7 @@ def extract_document_structure(scrollable_frame: tk.Frame) -> List[Dict[str, Any
             is_resta = False
             is_factorial = False
             is_raiz = False
+            is_binario = False
 
             # Detectar división: tabla de 2 columnas y fila 0 con números
             if cols == 2 and len(children) > 2:
@@ -129,18 +130,40 @@ def extract_document_structure(scrollable_frame: tk.Frame) -> List[Dict[str, Any
                 except:
                     matrix[r][c] = ''
 
-            # Heurística para detectar raíz: (0,0) contiene el índice (Frame con Label)
-            # y (0,1) contiene el radicando como texto numérico
-            # Además, las tablas de raíz tienen 3 columnas
+            # Heurística para detectar raíz: (0,0) índice y (0,1) radicando numérico, con 3 columnas
             try:
                 if cols == 3:
                     c00_text = matrix[0][0]
                     c01_text = matrix[0][1] if len(matrix[0]) > 1 else ''
-                    # Si en (0,0) hay un dígito (índice) y en (0,1) hay un número (radicando)
                     if c00_text.strip().isdigit() and c01_text.strip().isdigit():
                         is_raiz = True
             except Exception:
                 pass
+
+            # Heurística para detectar binario:
+            # - Primera fila con número en (0,0)
+            # - Al menos dos '2' en la tabla
+            try:
+                count_twos = 0
+                first_row_has_number = False
+                
+                # Verificar primera fila
+                for j, val in enumerate(matrix[0] if matrix else []):
+                    if j == 0 and val.strip().isdigit():
+                        first_row_has_number = True
+                    if val.strip() == '2':
+                        count_twos += 1
+                
+                # Contar '2' en filas siguientes
+                for r in range(1, len(matrix)):
+                    for c in range(len(matrix[r])):
+                        if matrix[r][c].strip() == '2':
+                            count_twos += 1
+                
+                if first_row_has_number and count_twos >= 2:
+                    is_binario = True
+            except Exception:
+                is_binario = False
 
             blocks.append({
                 'type': 'table',
@@ -149,7 +172,8 @@ def extract_document_structure(scrollable_frame: tk.Frame) -> List[Dict[str, Any
                 'suma': is_suma,
                 'resta': is_resta,
                 'factorial': is_factorial,
-                'raiz': is_raiz
+                'raiz': is_raiz,
+                'binario': is_binario
             })
             continue
 
@@ -210,6 +234,7 @@ def export_to_pdf(scrollable_frame: tk.Frame, output_path: str = "document.pdf",
             is_resta = block.get('resta', False)
             is_factorial = block.get('factorial', False)
             is_raiz = block.get('raiz', False)
+            is_binario = block.get('binario', False)
             is_multiplicacion = any('X' in row for row in data)
 
             table_data = [[("" if cell is None else str(cell)) for cell in row] for row in data]
@@ -282,7 +307,7 @@ def export_to_pdf(scrollable_frame: tk.Frame, output_path: str = "document.pdf",
                     ('TOPPADDING', (0, 0), (-1, -1), 5),
                 ]))
 
-            # --- Raíz (tabla totalmente en blanco, sin bordes) ---
+            # --- Raíz (con bordes específicos para simular el radical) ---
             elif is_raiz:
                 table = Table(table_data, colWidths=[usable_width / num_cols] * num_cols, hAlign='CENTER')
                 table.setStyle(TableStyle([
@@ -293,29 +318,81 @@ def export_to_pdf(scrollable_frame: tk.Frame, output_path: str = "document.pdf",
                     ('LINEBELOW', (0, 0), (-1, -1), 0, colors.white),
                     ('LINEBEFORE', (0, 0), (-1, -1), 0, colors.white),
                     ('LINEAFTER', (0, 0), (-1, -1), 0, colors.white),
-            
+
                     # Tipografía y alineación
                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                     ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                     ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
                     ('FONTSIZE', (0, 0), (-1, -1), 11),
-            
+
                     # Paddings mínimos
                     ('LEFTPADDING', (0, 0), (-1, -1), 0),
                     ('RIGHTPADDING', (0, 0), (-1, -1), 0),
                     ('TOPPADDING', (0, 0), (-1, -1), 2),
                     ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-            
-                    # Estilos específicos (deben ir al final para “ganar”)
-                    # 1) Borde derecho de la celda (fila 0, col 0) => (0,0)
+
+                    # Estilos específicos para simular el símbolo de raíz
+                    # 1) Borde derecho de la celda (fila 0, col 0) - parte vertical del radical
                     ('LINEAFTER', (0, 0), (0, 0), 1.2, colors.black),
-            
-                    # 2) Borde superior de la celda (fila 0, col 1) => (1,0)
+
+                    # 2) Borde superior de la celda (fila 0, col 1) - techo del radical
                     ('LINEABOVE', (1, 0), (1, 0), 1.2, colors.black),
-            
-                    # 3) Borde izquierdo de toda la columna 2 (col=2, desde fila 0 hasta última fila)
+
+                    # 3) Borde izquierdo de toda la columna 2 - cierre del radical
                     ('LINEBEFORE', (2, 0), (2, -1), 1.2, colors.black),
                 ]))
+
+            # --- Binario (línea inferior en última celda con valor por fila, y borde derecho en su izquierda) ---
+            elif is_binario:
+                base_styles = [
+                    # Reset total de bordes
+                    ('BOX', (0, 0), (-1, -1), 0, colors.white),
+                    ('GRID', (0, 0), (-1, -1), 0, colors.white),
+                    ('LINEABOVE', (0, 0), (-1, -1), 0, colors.white),
+                    ('LINEBELOW', (0, 0), (-1, -1), 0, colors.white),
+                    ('LINEBEFORE', (0, 0), (-1, -1), 0, colors.white),
+                    ('LINEAFTER', (0, 0), (-1, -1), 0, colors.white),
+
+                    # Tipografía y alineación
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 11),
+
+                    # Paddings
+                    ('LEFTPADDING', (0, 0), (-1, -1), 2),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+                    ('TOPPADDING', (0, 0), (-1, -1), 2),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                ]
+
+                # Reglas por fila (excepto última)
+                line_width = 1.0
+                line_color = colors.black
+
+                for r in range(num_rows - 1):  # Todas menos la última fila
+                    # Buscar la celda más a la derecha con contenido no vacío
+                    c_right = None
+                    for c in reversed(range(num_cols)):
+                        if table_data[r][c].strip() != '':
+                            c_right = c
+                            break
+
+                    if c_right is not None:
+                        # 1) Línea inferior en la celda más a la derecha con valor
+                        base_styles.append(('LINEBELOW', (c_right, r), (c_right, r), line_width, line_color))
+
+                        # 2) Borde derecho en la celda inmediatamente a su izquierda, si existe
+                        c_left = c_right - 1
+                        if c_left >= 0:
+                            base_styles.append(('LINEAFTER', (c_left, r), (c_left, r), line_width, line_color))
+                            # Si prefieres solo cuando la celda izquierda también tenga contenido, usa:
+                            # if table_data[r][c_left].strip() != '':
+                            #     base_styles.append(('LINEAFTER', (c_left, r), (c_left, r), line_width, line_color))
+
+                table = Table(table_data, colWidths=[usable_width / num_cols] * num_cols, hAlign='CENTER')
+                table.setStyle(TableStyle(base_styles))
+
             # --- Tablas normales ---
             else:
                 table = Table(table_data, colWidths=[usable_width / num_cols] * num_cols, hAlign='CENTER')
