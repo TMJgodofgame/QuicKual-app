@@ -12,18 +12,36 @@ from reportlab.lib.units import mm
 from typing import List, Dict, Any
 
 
+def _safe_get_text(widget: tk.Widget) -> str:
+    """
+    Extrae texto de Entry, Label o busca recursivamente en subwidgets.
+    """
+    try:
+        if isinstance(widget, tk.Entry):
+            return widget.get()
+        if isinstance(widget, tk.Label):
+            return widget.cget('text')
+        # Buscar recursivamente en hijos
+        text = ""
+        for sub in widget.winfo_children():
+            text += _safe_get_text(sub)
+        return text
+    except Exception:
+        return ""
+
+
 def extract_document_structure(scrollable_frame: tk.Frame) -> List[Dict[str, Any]]:
     """
     Extrae la estructura del documento desde el frame scrollable de Tkinter.
-    
+
     Args:
         scrollable_frame: Frame de Tkinter que contiene los bloques del documento.
-    
+
     Returns:
         Lista de diccionarios representando cada bloque (texto o tabla).
     """
-    blocks = []
-    
+    blocks: List[Dict[str, Any]] = []
+
     for child in scrollable_frame.winfo_children():
         children = child.winfo_children()
         if not children:
@@ -41,150 +59,168 @@ def extract_document_structure(scrollable_frame: tk.Frame) -> List[Dict[str, Any
             blocks.append({'type': 'text', 'content': text})
             continue
 
-        # Bloques de tabla
+        # Bloques de tabla: buscar widgets en grid (incluyendo subwidgets)
         cell_widgets = []
         max_row = -1
         max_col = -1
-        
+
         for w in children:
+            # Buscar en subwidgets (para capturar el frame "content")
+            if w.winfo_children():
+                for sw in w.winfo_children():
+                    try:
+                        gi = sw.grid_info()
+                    except Exception:
+                        gi = {}
+
+                    if gi:
+                        try:
+                            r = int(gi.get('row', 0))
+                            c = int(gi.get('column', 0))
+                        except Exception:
+                            r, c = 0, 0
+
+                        cell_widgets.append((r, c, sw))
+                        max_row = max(max_row, r)
+                        max_col = max(max_col, c)
+
+            # También intentar con el widget mismo
             try:
                 gi = w.grid_info()
             except Exception:
                 gi = {}
-            
+
             if gi:
                 try:
                     r = int(gi.get('row', 0))
                     c = int(gi.get('column', 0))
                 except Exception:
                     r, c = 0, 0
-                
+
                 cell_widgets.append((r, c, w))
-                if r > max_row:
-                    max_row = r
-                if c > max_col:
-                    max_col = c
+                max_row = max(max_row, r)
+                max_col = max(max_col, c)
 
-        if cell_widgets:
-            rows = max_row + 1
-            cols = max_col + 1
-            matrix = [['' for _ in range(cols)] for _ in range(rows)]
-            
-            is_division = False
-            is_suma = False
-            is_resta = False
-            is_factorial = False
-            is_raiz = False
-            is_binario = False
-
-            # Detectar división: tabla de 2 columnas y fila 0 con números
-            if cols == 2 and len(children) > 2:
-                c0_text = ''
-                c1_text = ''
-                for r, c, w in cell_widgets:
-                    try:
-                        txt = w.get() if isinstance(w, tk.Entry) else ''
-                    except:
-                        txt = ''
-                    if r == 0 and c == 0:
-                        c0_text = txt
-                    if r == 0 and c == 1:
-                        c1_text = txt
-                if c0_text.isdigit() and c1_text.isdigit():
-                    is_division = True
-
-            # Extraer contenido de celdas y detectar operaciones
-            for r, c, w in cell_widgets:
-                try:
-                    txt = ''
-                    if isinstance(w, tk.Entry):
-                        txt = w.get()
-                    elif isinstance(w, tk.Label):
-                        txt = w.cget('text')
-                    else:
-                        # Buscar en subwidgets (para Frame con Label, como en raíz)
-                        for sub in w.winfo_children():
-                            if isinstance(sub, tk.Label):
-                                txt += sub.cget('text')
-                            elif isinstance(sub, tk.Entry):
-                                try:
-                                    txt += sub.get()
-                                except:
-                                    pass
-                            elif isinstance(sub, tk.Text):
-                                try:
-                                    txt += sub.get("1.0", "end-1c")
-                                except:
-                                    pass
-                    
-                    matrix[r][c] = txt
-                    
-                    # Detectar tipo de operación
-                    if txt.strip().startswith('+') and r == 2:
-                        is_suma = True
-                    if txt.strip().startswith('-') and r == 2:
-                        is_resta = True
-                    if '!' in txt:
-                        is_factorial = True
-                        
-                except:
-                    matrix[r][c] = ''
-
-            # Heurística para detectar raíz: (0,0) índice y (0,1) radicando numérico, con 3 columnas
-            try:
-                if cols == 3:
-                    c00_text = matrix[0][0]
-                    c01_text = matrix[0][1] if len(matrix[0]) > 1 else ''
-                    if c00_text.strip().isdigit() and c01_text.strip().isdigit():
-                        is_raiz = True
-            except Exception:
-                pass
-
-            # Heurística para detectar binario:
-            # - Primera fila con número en (0,0)
-            # - Al menos dos '2' en la tabla
-            try:
-                count_twos = 0
-                first_row_has_number = False
-                
-                # Verificar primera fila
-                for j, val in enumerate(matrix[0] if matrix else []):
-                    if j == 0 and val.strip().isdigit():
-                        first_row_has_number = True
-                    if val.strip() == '2':
-                        count_twos += 1
-                
-                # Contar '2' en filas siguientes
-                for r in range(1, len(matrix)):
-                    for c in range(len(matrix[r])):
-                        if matrix[r][c].strip() == '2':
-                            count_twos += 1
-                
-                if first_row_has_number and count_twos >= 2:
-                    is_binario = True
-            except Exception:
-                is_binario = False
-
-            blocks.append({
-                'type': 'table',
-                'content': matrix,
-                'division': is_division,
-                'suma': is_suma,
-                'resta': is_resta,
-                'factorial': is_factorial,
-                'raiz': is_raiz,
-                'binario': is_binario
-            })
+        if not cell_widgets:
+            # Si no hay grid, intentar extraer texto plano
+            text = "".join(_safe_get_text(w) for w in children).strip()
+            if text:
+                blocks.append({'type': 'text', 'content': text})
             continue
+
+        rows = max_row + 1
+        cols = max_col + 1
+        matrix = [['' for _ in range(cols)] for _ in range(rows)]
+
+        # Heurísticas de detección (reiniciar flags)
+        is_division = False
+        is_suma = False
+        is_resta = False
+        is_factorial = False
+        is_raiz = False
+        is_binario = False
+        is_multiplicacion = False
+
+        # Rellenar matriz
+        for r, c, w in cell_widgets:
+            txt = _safe_get_text(w)
+            matrix[r][c] = txt
+
+        # Utilidades
+        def is_int_str(s: str) -> bool:
+            s = s.strip()
+            if not s:
+                return False
+            if s.startswith('-'):
+                s = s[1:]
+            return s.isdigit()
+
+        def digits_only(s: str) -> str:
+            return ''.join(ch for ch in s if ch.isdigit())
+
+        # Conteos útiles
+        flat = [str(matrix[r][c]).strip() for r in range(rows) for c in range(cols)]
+        count_twos = sum(1 for v in flat if v == '2')
+        has_sqrt_symbol = any('√' in v for v in flat)
+
+        # División: 2 columnas y primera fila con números
+        if cols == 2 and rows >= 1:
+            c0_text = matrix[0][0].strip()
+            c1_text = matrix[0][1].strip()
+            if is_int_str(c0_text) and is_int_str(c1_text):
+                is_division = True
+
+        # Suma/Resta: símbolo en primera col (± en primeras filas)
+        for r in range(min(rows, 4)):
+            sym = matrix[r][0].strip() if cols > 0 else ""
+            if sym == "+":
+                is_suma = True
+            if sym == "-":
+                is_resta = True
+
+        # Multiplicación: 'X' o 'x' en primera columna
+        for r in range(rows):
+            if cols > 0 and ('X' in str(matrix[r][0]) or 'x' in str(matrix[r][0])):
+                is_multiplicacion = True
+                break
+
+        # Factorial: cualquier '!'
+        is_factorial = any('!' in v for v in flat)
+
+        # BINARIO - detección fuerte
+        first_row_is_int = cols > 0 and rows > 0 and is_int_str(matrix[0][0])
+        rows_with_two = {r for r in range(rows) if any((str(matrix[r][c]).strip() == '2') for c in range(cols))}
+        first_row_col1_is_two_or_empty = (cols > 1 and (matrix[0][1].strip() in ('', '2'))) or (cols == 1)
+        binario_strong = (first_row_is_int and count_twos >= 2 and len(rows_with_two) >= 2 and first_row_col1_is_two_or_empty)
+
+        # RAÍZ - detección estricta si no hay símbolo √
+        raiz_strict = False
+        if not has_sqrt_symbol:
+            if cols >= 3 and rows >= 1:
+                c00_digits = digits_only(matrix[0][0])
+                c01_digits = digits_only(matrix[0][1]) if cols > 1 else ''
+                looks_like_index = 1 <= len(c00_digits) <= 2
+                looks_like_radicand = len(c01_digits) >= 1
+                # verificar "barra vertical" en col 2: contenido no vacío en ≥2 filas contiguas
+                streak = 0
+                max_streak = 0
+                for rr in range(rows):
+                    if matrix[rr][2].strip() != '':
+                        streak += 1
+                        max_streak = max(max_streak, streak)
+                    else:
+                        streak = 0
+                has_vertical_bar = max_streak >= 2
+                raiz_strict = looks_like_index and looks_like_radicand and has_vertical_bar
+
+        # Prioridad y decisión final
+        if has_sqrt_symbol and not binario_strong:
+            is_raiz = True
+        elif binario_strong:
+            is_binario = True
+        elif raiz_strict:
+            is_raiz = True
+
+        blocks.append({
+            'type': 'table',
+            'content': matrix,
+            'division': is_division,
+            'suma': is_suma,
+            'resta': is_resta,
+            'factorial': is_factorial,
+            'raiz': is_raiz,
+            'binario': is_binario,
+            'multiplicacion': is_multiplicacion
+        })
 
     return blocks
 
 
-def export_to_pdf(scrollable_frame: tk.Frame, output_path: str = "document.pdf", 
+def export_to_pdf(scrollable_frame: tk.Frame, output_path: str = "document.pdf",
                   title: str = None, page_size=letter) -> None:
     """
     Exporta el contenido del frame scrollable a un archivo PDF.
-    
+
     Args:
         scrollable_frame: Frame de Tkinter con el contenido a exportar.
         output_path: Ruta del archivo PDF de salida.
@@ -223,191 +259,174 @@ def export_to_pdf(scrollable_frame: tk.Frame, output_path: str = "document.pdf",
             para = Paragraph(text.replace('\n', '<br/>'), normal)
             story.append(para)
             story.append(Spacer(1, 10))
+            continue
 
-        elif block['type'] == 'table':
-            data = block['content']
-            if not data:
-                continue
+        if block['type'] != 'table':
+            continue
 
-            is_division = block.get('division', False)
-            is_suma = block.get('suma', False)
-            is_resta = block.get('resta', False)
-            is_factorial = block.get('factorial', False)
-            is_raiz = block.get('raiz', False)
-            is_binario = block.get('binario', False)
-            is_multiplicacion = any('X' in row for row in data)
+        data = block['content'] or []
+        if not data:
+            continue
 
-            table_data = [[("" if cell is None else str(cell)) for cell in row] for row in data]
+        is_division = block.get('division', False)
+        is_suma = block.get('suma', False)
+        is_resta = block.get('resta', False)
+        is_factorial = block.get('factorial', False)
+        is_raiz = block.get('raiz', False)
+        is_binario = block.get('binario', False)
+        is_multiplicacion = block.get('multiplicacion', False)
 
-            usable_width = page_size[0] - 40 * mm
-            num_cols = len(table_data[0])
-            num_rows = len(table_data)
+        # Asegurar strings
+        table_data = [[("" if cell is None else str(cell)) for cell in row] for row in data]
 
-            # --- División ---
-            if is_division:
-                half_width = usable_width / 2.0
-                col_widths = [half_width, half_width]
+        usable_width = page_size[0] - 40 * mm
+        num_cols = max(1, len(table_data[0]))
+        num_rows = len(table_data)
 
-                table = Table(table_data, colWidths=col_widths, hAlign='CENTER')
-                table.setStyle(TableStyle([
-                    ('BOX', (0, 0), (-1, -1), 0, colors.white),
-                    ('LINEAFTER', (0, 0), (0, 0), 1.2, colors.black),
-                    ('LINEBELOW', (1, 0), (1, 0), 1.2, colors.black),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
-                    ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-                    ('TOPPADDING', (0, 0), (-1, -1), 5),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                    ('FONTSIZE', (0, 0), (-1, -1), 11),
-                ]))
+        def col_widths(nc: int):
+            w = usable_width / nc
+            return [w] * nc
 
-            # --- Suma / Resta ---
-            elif is_suma or is_resta:
-                table = Table(table_data, colWidths=[usable_width / num_cols] * num_cols, hAlign='CENTER')
-                table.setStyle(TableStyle([
-                    ('BOX', (0, 0), (-1, -1), 0, colors.white),
-                    ('LINEABOVE', (0, -1), (-1, -1), 1, colors.black),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                    ('FONTSIZE', (0, 0), (-1, -1), 11),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-                    ('TOPPADDING', (0, 0), (-1, -1), 5),
-                ]))
+        # División
+        if is_division:
+            colw = [usable_width / 2.0, usable_width / 2.0]
+            table = Table(table_data, colWidths=colw, hAlign='CENTER')
+            table.setStyle(TableStyle([
+                ('BOX', (0, 0), (-1, -1), 0, colors.white),
+                ('LINEAFTER', (0, 0), (0, 0), 1.2, colors.black),
+                ('LINEBELOW', (1, 0), (1, 0), 1.2, colors.black),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ]))
+        # Suma/Resta
+        elif is_suma or is_resta:
+            table = Table(table_data, colWidths=col_widths(num_cols), hAlign='CENTER')
+            table.setStyle(TableStyle([
+                ('BOX', (0, 0), (-1, -1), 0, colors.white),
+                ('LINEABOVE', (0, -1), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ]))
+        # Multiplicación
+        elif is_multiplicacion:
+            table = Table(table_data, colWidths=col_widths(num_cols), hAlign='CENTER')
+            table.setStyle(TableStyle([
+                ('BOX', (0, 0), (-1, -1), 0, colors.white),
+                ('LINEBELOW', (0, 2), (-1, 2), 1, colors.black),
+                ('LINEABOVE', (0, num_rows - 1), (-1, num_rows - 1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ]))
+        # Factorial
+        elif is_factorial:
+            table = Table(table_data, colWidths=col_widths(num_cols), hAlign='CENTER')
+            table.setStyle(TableStyle([
+                ('BOX', (0, 0), (-1, -1), 0, colors.white),
+                ('LINEABOVE', (0, 0), (-1, 0), 1, colors.black),
+                ('LINEBELOW', (0, num_rows - 1), (-1, num_rows - 1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ]))
+        # Raíz
+        elif is_raiz:
+            table = Table(table_data, colWidths=col_widths(num_cols), hAlign='CENTER')
+            table.setStyle(TableStyle([
+                ('BOX', (0, 0), (-1, -1), 0, colors.white),
+                ('GRID', (0, 0), (-1, -1), 0, colors.white),
+                ('LINEABOVE', (0, 0), (-1, -1), 0, colors.white),
+                ('LINEBELOW', (0, 0), (-1, -1), 0, colors.white),
+                ('LINEBEFORE', (0, 0), (-1, -1), 0, colors.white),
+                ('LINEAFTER', (0, 0), (-1, -1), 0, colors.white),
 
-            # --- Multiplicación ---
-            elif is_multiplicacion:
-                table = Table(table_data, colWidths=[usable_width / num_cols] * num_cols, hAlign='CENTER')
-                table.setStyle(TableStyle([
-                    ('BOX', (0, 0), (-1, -1), 0, colors.white),
-                    ('LINEBELOW', (0, 2), (-1, 2), 1, colors.black),
-                    ('LINEABOVE', (0, num_rows - 1), (-1, num_rows - 1), 1, colors.black),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                    ('FONTSIZE', (0, 0), (-1, -1), 11),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-                    ('TOPPADDING', (0, 0), (-1, -1), 5),
-                ]))
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
 
-            # --- Factorial ---
-            elif is_factorial:
-                table = Table(table_data, colWidths=[usable_width / num_cols] * num_cols, hAlign='CENTER')
-                table.setStyle(TableStyle([
-                    ('BOX', (0, 0), (-1, -1), 0, colors.white),
-                    ('LINEABOVE', (0, 0), (-1, 0), 1, colors.black),
-                    ('LINEBELOW', (0, num_rows - 1), (-1, num_rows - 1), 1, colors.black),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                    ('FONTSIZE', (0, 0), (-1, -1), 11),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-                    ('TOPPADDING', (0, 0), (-1, -1), 5),
-                ]))
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 2),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
 
-            # --- Raíz (con bordes específicos para simular el radical) ---
-            elif is_raiz:
-                table = Table(table_data, colWidths=[usable_width / num_cols] * num_cols, hAlign='CENTER')
-                table.setStyle(TableStyle([
-                    # Reset completo de líneas y bordes global
-                    ('BOX', (0, 0), (-1, -1), 0, colors.white),
-                    ('GRID', (0, 0), (-1, -1), 0, colors.white),
-                    ('LINEABOVE', (0, 0), (-1, -1), 0, colors.white),
-                    ('LINEBELOW', (0, 0), (-1, -1), 0, colors.white),
-                    ('LINEBEFORE', (0, 0), (-1, -1), 0, colors.white),
-                    ('LINEAFTER', (0, 0), (-1, -1), 0, colors.white),
+                ('LINEAFTER', (0, 0), (0, 0), 1.2, colors.black),
+                ('LINEABOVE', (1, 0), (1, 0), 1.2, colors.black),
+                ('LINEBEFORE', (2, 0), (2, -1), 1.2, colors.black),
+            ]))
+        # Binario: sin ningún borde (Paso 1)
+        # --- Binario: solo borde inferior en celdas con "2" (dividendo) ---
+        # --- Binario: borde inferior en celdas "2" y borde derecho en la celda de su izquierda ---
+        elif is_binario:
+            table = Table(table_data, colWidths=col_widths(num_cols), hAlign='CENTER')
 
-                    # Tipografía y alineación
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                    ('FONTSIZE', (0, 0), (-1, -1), 11),
+            base_styles = [
+                # Sin bordes globales
+                ('BOX', (0, 0), (-1, -1), 0, colors.white),
+                ('GRID', (0, 0), (-1, -1), 0, colors.white),
+                ('LINEABOVE', (0, 0), (-1, -1), 0, colors.white),
+                ('LINEBELOW', (0, 0), (-1, -1), 0, colors.white),
+                ('LINEBEFORE', (0, 0), (-1, -1), 0, colors.white),
+                ('LINEAFTER', (0, 0), (-1, -1), 0, colors.white),
 
-                    # Paddings mínimos
-                    ('LEFTPADDING', (0, 0), (-1, -1), 0),
-                    ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-                    ('TOPPADDING', (0, 0), (-1, -1), 2),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                # Tipografía y alineación
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
 
-                    # Estilos específicos para simular el símbolo de raíz
-                    # 1) Borde derecho de la celda (fila 0, col 0) - parte vertical del radical
-                    ('LINEAFTER', (0, 0), (0, 0), 1.2, colors.black),
+                # Paddings compactos
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 2),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ]
 
-                    # 2) Borde superior de la celda (fila 0, col 1) - techo del radical
-                    ('LINEABOVE', (1, 0), (1, 0), 1.2, colors.black),
+            line_width = 1.0
+            line_color = colors.black
 
-                    # 3) Borde izquierdo de toda la columna 2 - cierre del radical
-                    ('LINEBEFORE', (2, 0), (2, -1), 1.2, colors.black),
-                ]))
+            for r in range(num_rows):
+                for c in range(num_cols):
+                    if str(table_data[r][c]).strip() == '2':
+                        # 1) Línea inferior en la celda del "2"
+                        base_styles.append(('LINEBELOW', (c, r), (c, r), line_width, line_color))
+                        # 2) Borde derecho en la celda a la izquierda (si existe)
+                        left_c = c - 1
+                        if left_c >= 0:
+                            base_styles.append(('LINEAFTER', (left_c, r), (left_c, r), line_width, line_color))
 
-            # --- Binario (línea inferior en última celda con valor por fila, y borde derecho en su izquierda) ---
-            elif is_binario:
-                base_styles = [
-                    # Reset total de bordes
-                    ('BOX', (0, 0), (-1, -1), 0, colors.white),
-                    ('GRID', (0, 0), (-1, -1), 0, colors.white),
-                    ('LINEABOVE', (0, 0), (-1, -1), 0, colors.white),
-                    ('LINEBELOW', (0, 0), (-1, -1), 0, colors.white),
-                    ('LINEBEFORE', (0, 0), (-1, -1), 0, colors.white),
-                    ('LINEAFTER', (0, 0), (-1, -1), 0, colors.white),
+            table.setStyle(TableStyle(base_styles))
+        # Tabla normal (fallback)
+        else:
+            table = Table(table_data, colWidths=col_widths(num_cols), hAlign='CENTER')
+            table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.6, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('WORDWRAP', (0, 0), (-1, -1), 'CJK'),
+            ]))
 
-                    # Tipografía y alineación
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                    ('FONTSIZE', (0, 0), (-1, -1), 11),
-
-                    # Paddings
-                    ('LEFTPADDING', (0, 0), (-1, -1), 2),
-                    ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-                    ('TOPPADDING', (0, 0), (-1, -1), 2),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-                ]
-
-                # Reglas por fila (excepto última)
-                line_width = 1.0
-                line_color = colors.black
-
-                for r in range(num_rows - 1):  # Todas menos la última fila
-                    # Buscar la celda más a la derecha con contenido no vacío
-                    c_right = None
-                    for c in reversed(range(num_cols)):
-                        if table_data[r][c].strip() != '':
-                            c_right = c
-                            break
-
-                    if c_right is not None:
-                        # 1) Línea inferior en la celda más a la derecha con valor
-                        base_styles.append(('LINEBELOW', (c_right, r), (c_right, r), line_width, line_color))
-
-                        # 2) Borde derecho en la celda inmediatamente a su izquierda, si existe
-                        c_left = c_right - 1
-                        if c_left >= 0:
-                            base_styles.append(('LINEAFTER', (c_left, r), (c_left, r), line_width, line_color))
-                            # Si prefieres solo cuando la celda izquierda también tenga contenido, usa:
-                            # if table_data[r][c_left].strip() != '':
-                            #     base_styles.append(('LINEAFTER', (c_left, r), (c_left, r), line_width, line_color))
-
-                table = Table(table_data, colWidths=[usable_width / num_cols] * num_cols, hAlign='CENTER')
-                table.setStyle(TableStyle(base_styles))
-
-            # --- Tablas normales ---
-            else:
-                table = Table(table_data, colWidths=[usable_width / num_cols] * num_cols, hAlign='CENTER')
-                table.setStyle(TableStyle([
-                    ('GRID', (0, 0), (-1, -1), 0.6, colors.black),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                    ('FONTSIZE', (0, 0), (-1, -1), 11),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-                    ('TOPPADDING', (0, 0), (-1, -1), 5),
-                    ('WORDWRAP', (0, 0), (-1, -1), 'CJK'),
-                ]))
-
-            story.append(table)
-            story.append(Spacer(1, 10))
+        story.append(table)
+        story.append(Spacer(1, 10))
 
     doc.build(story)
