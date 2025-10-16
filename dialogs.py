@@ -8,6 +8,7 @@ from bloques import _add_header_with_trash, mover_botones_abajo
 # Utilidades para + y -
 # ====
 
+
 def _normalize_decimal_input(text: str) -> str:
     """
     Normaliza la entrada:
@@ -53,74 +54,106 @@ def _split_parts_for_display(original_text: str) -> tuple[str, str, bool]:
     return txt, "", False
 
 
-def _compute_widths_for_two_numbers(a_ent: str, a_dec: str, a_has_dec: bool,
-                                      b_ent: str, b_dec: str, b_has_dec: bool) -> tuple[int, int, bool]:
+def _compute_widths_for_two_numbers(
+    a_ent: str, a_dec: str, a_has_dec: bool, b_ent: str, b_dec: str, b_has_dec: bool
+) -> tuple[int, int, bool]:
     max_entera = max(len(a_ent), len(b_ent))
     max_decimal = max(len(a_dec), len(b_dec))
-    show_comma = (a_has_dec or b_has_dec)
+    show_comma = a_has_dec or b_has_dec
     return max_entera, max_decimal, show_comma
 
 
-def _build_grid_for_addsub(parent_content: tk.Frame, filas: int, columnas: int, font_size: int = 16, padding: int = 4):
-    entries = {}
+def _build_grid_for_addsub(
+    parent_content: tk.Frame, filas: int, columnas: int, font_size: int = 16, padding: int = 4
+) -> dict[tuple[int, int], tk.Entry]:
+    """
+    Construye una rejilla de Entries y devuelve un dict con claves (fila, col).
+    Asegura que existan exactamente `filas` x `columnas` entradas.
+    """
+    entries: dict[tuple[int, int], tk.Entry] = {}
     for i in range(filas):
         parent_content.grid_rowconfigure(i, weight=1)
     for j in range(columnas):
         parent_content.grid_columnconfigure(j, weight=1)
-        e = tk.Entry(parent_content, font=("Arial", font_size), justify="center", bd=2, relief="groove")
-        e.grid(row=i, column=j, sticky="nsew", padx=padding, pady=padding)
-        entries[(i, j)] = e
+
+    for i in range(filas):
+        for j in range(columnas):
+            e = tk.Entry(
+                parent_content, font=("Arial", font_size), justify="center", bd=2, relief="groove"
+            )
+            e.grid(row=i, column=j, sticky="nsew", padx=padding, pady=padding)
+            entries[(i, j)] = e
     return entries
 
 
-def _place_number_into_entries(entries: dict,
-                                 fila: int,
-                                 entera: str,
-                                 decimal: str,
-                                 max_entera: int,
-                                 max_decimal: int,
-                                 show_comma: bool,
-                                 has_decimal: bool,    # decide si escribir la coma visual
-                                 start_col: int = 0,
-                                 font_disable: bool = True) -> None:
+def _place_number_into_entries(
+    entries: dict,
+    fila: int,
+    entera: str,
+    decimal: str,
+    max_entera: int,
+    max_decimal: int,
+    show_comma: bool,
+    has_decimal: bool,  # decide si escribir la coma visual
+    start_col: int = 0,
+    font_disable: bool = True,
+) -> None:
     """
-    Inserta un número separando parte entera/decimal.
-    - Parte entera a la derecha.
-    - Coma solo si has_decimal es True.
-    - Decimales a la izquierda después de la coma (si existe).
+    Inserta visualmente un número en la fila `fila` del grid representado por `entries`.
+
+    Convenciones:
+    - columna `start_col` se reserva para el símbolo de operación (por eso las partes comienzan en start_col + 1).
+    - la parte entera se alinea a la derecha ocupando `max_entera` columnas.
+    - si `show_comma` y `has_decimal` es True, se inserta la coma en la columna correspondiente.
+    - los decimales se colocan a la derecha de la coma hasta `max_decimal` posiciones.
+
+    La función es defensiva: si una celda esperada no existe en `entries`, la omite (evita KeyError).
     """
+    # Normaliza la parte entera mínima
     ent_str = entera
     if ent_str in ("", "+", "-"):
         ent_str = "0" if ent_str == "" else ent_str + "0"
 
-    # Parte entera
+    # Inserta la parte entera (derecha -> izquierda lógica)
+    # Columnas reservadas: start_col es símbolo, las cifras empiezan en start_col+1
     for i in range(max_entera):
-        j = start_col + 1 + i  # col 0 reservada para símbolo operación en fila 2
+        col = start_col + 1 + i
+        # índice del carácter a insertar
         idx_ent = len(ent_str) - (max_entera - i)
         ch = ent_str[idx_ent] if 0 <= idx_ent < len(ent_str) else ""
-        entries[(fila, j)].insert(0, ch)
-        if font_disable:
-            entries[(fila, j)].config(state="disabled")
+        key = (fila, col)
+        if key in entries:
+            entries[key].insert(0, ch)
+            if font_disable:
+                entries[key].config(state="disabled")
 
-    # Coma
+    # Columna de la coma (si corresponde)
     comma_col = start_col + 1 + max_entera
     if show_comma and has_decimal:
-        entries[(fila, comma_col)].insert(0, ",")
-        if font_disable:
-            entries[(fila, comma_col)].config(state="disabled")
+        key = (fila, comma_col)
+        if key in entries:
+            entries[key].insert(0, ",")
+            if font_disable:
+                entries[key].config(state="disabled")
 
-    # Decimales
+    # Decimales: a la derecha de la coma (si existe) o a continuación de la parte entera
     for d in range(max_decimal):
-        j = (comma_col + 1 + d) if show_comma else (start_col + 1 + max_entera + d)
+        if show_comma:
+            col = comma_col + 1 + d
+        else:
+            col = start_col + 1 + max_entera + d
         ch = decimal[d] if d < len(decimal) else ""
-        entries[(fila, j)].insert(0, ch)
-        if font_disable:
-            entries[(fila, j)].config(state="disabled")
+        key = (fila, col)
+        if key in entries:
+            entries[key].insert(0, ch)
+            if font_disable:
+                entries[key].config(state="disabled")
 
 
 # ====
-# Bloque de texto (sin cambios)
+# Bloque de texto
 # ====
+
 
 def agregar_bloque_texto(scrollable_frame, botones_frame, canvas):
     bloque = tk.Frame(scrollable_frame, bd=3, relief="groove", bg="white")
@@ -136,7 +169,9 @@ def agregar_bloque_texto(scrollable_frame, botones_frame, canvas):
 
     content = _add_header_with_trash(bloque, botones_frame, canvas)
 
-    text_widget = tk.Text(content, wrap="word", font=("Arial", 14), undo=True, borderwidth=0, bg="white")
+    text_widget = tk.Text(
+        content, wrap="word", font=("Arial", 14), undo=True, borderwidth=0, bg="white"
+    )
     text_widget.pack(fill="both", expand=True, padx=5, pady=5)
 
     text_widget.focus_set()
@@ -149,20 +184,19 @@ def agregar_bloque_texto(scrollable_frame, botones_frame, canvas):
     canvas.update_idletasks()
 
 
-def mover_botones_abajo(botones_frame, canvas):
-    botones_frame.pack_forget()
-    botones_frame.pack(side="top", pady=10)
-    canvas.update_idletasks()
-
-
 # ====
 # Diálogos personalizados
 # ====
 
+
 class SumaDialog(simpledialog.Dialog):
     def body(self, master):
-        tk.Label(master, text="Ingrese el primer sumando:", font=("Arial", 14)).grid(row=0, column=0, sticky="w", pady=5)
-        tk.Label(master, text="Ingrese el segundo sumando:", font=("Arial", 14)).grid(row=1, column=0, sticky="w", pady=5)
+        tk.Label(master, text="Ingrese el primer sumando:", font=("Arial", 14)).grid(
+            row=0, column=0, sticky="w", pady=5
+        )
+        tk.Label(master, text="Ingrese el segundo sumando:", font=("Arial", 14)).grid(
+            row=1, column=0, sticky="w", pady=5
+        )
 
         self.entry_a = tk.Entry(master, font=("Arial", 14))
         self.entry_b = tk.Entry(master, font=("Arial", 14))
@@ -177,8 +211,12 @@ class SumaDialog(simpledialog.Dialog):
 
 class RestaDialog(simpledialog.Dialog):
     def body(self, master):
-        tk.Label(master, text="Ingrese el minuendo:", font=("Arial", 14)).grid(row=0, column=0, sticky="w", pady=5)
-        tk.Label(master, text="Ingrese el sustraendo:", font=("Arial", 14)).grid(row=1, column=0, sticky="w", pady=5)
+        tk.Label(master, text="Ingrese el minuendo:", font=("Arial", 14)).grid(
+            row=0, column=0, sticky="w", pady=5
+        )
+        tk.Label(master, text="Ingrese el sustraendo:", font=("Arial", 14)).grid(
+            row=1, column=0, sticky="w", pady=5
+        )
 
         self.entry_a = tk.Entry(master, font=("Arial", 14))
         self.entry_b = tk.Entry(master, font=("Arial", 14))
@@ -194,6 +232,7 @@ class RestaDialog(simpledialog.Dialog):
 # ====
 # Suma (decimales, 4 filas, sin resultado, fila 2 bloqueada)
 # ====
+
 
 def dibujar_tabla_suma(scrollable_frame, botones_frame, canvas):
     # Un único diálogo para ambos sumandos
@@ -211,7 +250,9 @@ def dibujar_tabla_suma(scrollable_frame, botones_frame, canvas):
         _ = _parse_decimal(a_text)
         _ = _parse_decimal(b_text)
     except (InvalidOperation, ValueError):
-        messagebox.showerror("Error", "Debes introducir números válidos (usa coma o punto para decimales).")
+        messagebox.showerror(
+            "Error", "Debes introducir números válidos (usa coma o punto para decimales)."
+        )
         return
 
     a_ent, a_dec, a_has_dec = _split_parts_for_display(a_text)
@@ -232,10 +273,16 @@ def dibujar_tabla_suma(scrollable_frame, botones_frame, canvas):
 
     # Fila 1: primer sumando
     _place_number_into_entries(
-        entries, fila=1, entera=a_ent, decimal=a_dec,
-        max_entera=max_ent, max_decimal=max_dec,
-        show_comma=show_comma, has_decimal=a_has_dec,
-        start_col=0, font_disable=True
+        entries,
+        fila=1,
+        entera=a_ent,
+        decimal=a_dec,
+        max_entera=max_ent,
+        max_decimal=max_dec,
+        show_comma=show_comma,
+        has_decimal=a_has_dec,
+        start_col=0,
+        font_disable=True,
     )
 
     # Fila 2: símbolo + y segundo sumando (bloqueada)
@@ -243,10 +290,16 @@ def dibujar_tabla_suma(scrollable_frame, botones_frame, canvas):
     entries[(2, 0)].config(state="disabled")
 
     _place_number_into_entries(
-        entries, fila=2, entera=b_ent, decimal=b_dec,
-        max_entera=max_ent, max_decimal=max_dec,
-        show_comma=show_comma, has_decimal=b_has_dec,
-        start_col=0, font_disable=True
+        entries,
+        fila=2,
+        entera=b_ent,
+        decimal=b_dec,
+        max_entera=max_ent,
+        max_decimal=max_dec,
+        show_comma=show_comma,
+        has_decimal=b_has_dec,
+        start_col=0,
+        font_disable=True,
     )
 
     # Bloquear TODA la fila 2
@@ -268,6 +321,7 @@ def dibujar_tabla_suma(scrollable_frame, botones_frame, canvas):
 # Resta (decimales, 4 filas, sin resultado, fila 2 bloqueada)
 # ====
 
+
 def dibujar_tabla_resta(scrollable_frame, botones_frame, canvas):
     # Un único diálogo para minuendo y sustraendo
     root_aux = tk.Tk()
@@ -284,7 +338,9 @@ def dibujar_tabla_resta(scrollable_frame, botones_frame, canvas):
         _ = _parse_decimal(a_text)
         _ = _parse_decimal(b_text)
     except (InvalidOperation, ValueError):
-        messagebox.showerror("Error", "Debes introducir números válidos (usa coma o punto para decimales).")
+        messagebox.showerror(
+            "Error", "Debes introducir números válidos (usa coma o punto para decimales)."
+        )
         return
 
     a_ent, a_dec, a_has_dec = _split_parts_for_display(a_text)
@@ -305,10 +361,16 @@ def dibujar_tabla_resta(scrollable_frame, botones_frame, canvas):
 
     # Fila 1: minuendo
     _place_number_into_entries(
-        entries, fila=1, entera=a_ent, decimal=a_dec,
-        max_entera=max_ent, max_decimal=max_dec,
-        show_comma=show_comma, has_decimal=a_has_dec,
-        start_col=0, font_disable=True
+        entries,
+        fila=1,
+        entera=a_ent,
+        decimal=a_dec,
+        max_entera=max_ent,
+        max_decimal=max_dec,
+        show_comma=show_comma,
+        has_decimal=a_has_dec,
+        start_col=0,
+        font_disable=True,
     )
 
     # Fila 2: símbolo - y sustraendo (bloqueada)
@@ -316,10 +378,16 @@ def dibujar_tabla_resta(scrollable_frame, botones_frame, canvas):
     entries[(2, 0)].config(state="disabled")
 
     _place_number_into_entries(
-        entries, fila=2, entera=b_ent, decimal=b_dec,
-        max_entera=max_ent, max_decimal=max_dec,
-        show_comma=show_comma, has_decimal=b_has_dec,
-        start_col=0, font_disable=True
+        entries,
+        fila=2,
+        entera=b_ent,
+        decimal=b_dec,
+        max_entera=max_ent,
+        max_decimal=max_dec,
+        show_comma=show_comma,
+        has_decimal=b_has_dec,
+        start_col=0,
+        font_disable=True,
     )
 
     # Bloquear toda la fila 2
@@ -338,14 +406,19 @@ def dibujar_tabla_resta(scrollable_frame, botones_frame, canvas):
 
 
 # ====
-# Multiplicación (sin cambios funcionales)
+# Multiplicación
 # ====
+
 
 def dibujar_tabla_multiplicacion(scrollable_frame, botones_frame, canvas, font_size=16, padding=4):
     class MultiplicacionDialog(simpledialog.Dialog):
         def body(self, master):
-            tk.Label(master, text="Introduce el 1º multiplicando:").grid(row=0, column=0, sticky="w")
-            tk.Label(master, text="Introduce el 2º multiplicando:").grid(row=1, column=0, sticky="w")
+            tk.Label(master, text="Introduce el 1º multiplicando:").grid(
+                row=0, column=0, sticky="w"
+            )
+            tk.Label(master, text="Introduce el 2º multiplicando:").grid(
+                row=1, column=0, sticky="w"
+            )
 
             self.entry_a = tk.Entry(master)
             self.entry_b = tk.Entry(master)
@@ -392,27 +465,31 @@ def dibujar_tabla_multiplicacion(scrollable_frame, botones_frame, canvas, font_s
 
     for i in range(filas):
         content.grid_rowconfigure(i, weight=1)
-    for j in range(columnas):
-        content.grid_columnconfigure(j, weight=1)
-        e = tk.Entry(content, font=("Arial", font_size), justify="center", bd=2, relief="groove")
-        e.grid(row=i, column=j, sticky="nsew", padx=padding, pady=padding)
-        entries[(i, j)] = e
+        for j in range(columnas):
+            content.grid_columnconfigure(j, weight=1)
+            e = tk.Entry(
+                content, font=("Arial", font_size), justify="center", bd=2, relief="groove"
+            )
+            e.grid(row=i, column=j, sticky="nsew", padx=padding, pady=padding)
+            entries[(i, j)] = e
 
     start_col_a = columnas - len(a_str)
     for j in range(columnas):
-        if j >= start_col_a:
+        if j >= start_col_a and (1, j) in entries:
             entries[(1, j)].insert(0, a_str[j - start_col_a])
+        if (1, j) in entries:
             entries[(1, j)].config(state="disabled")
 
     start_col_b = columnas - len(b_str)
     for j in range(columnas):
-        if j == 0:
+        if j == 0 and (2, j) in entries:
             entries[(2, j)].insert(0, "X")
-        elif j >= start_col_b:
+        elif j >= start_col_b and (2, j) in entries:
             entries[(2, j)].insert(0, b_str[j - start_col_b])
-        entries[(2, j)].config(state="disabled")
+        if (2, j) in entries:
+            entries[(2, j)].config(state="disabled")
 
-    if len(str(b)) > 1:
+    if len(str(b)) > 1 and (filas - 2, 0) in entries:
         entries[(filas - 2, 0)].insert(0, "+")
         entries[(filas - 2, 0)].config(state="disabled")
 
@@ -425,14 +502,19 @@ def dibujar_tabla_multiplicacion(scrollable_frame, botones_frame, canvas, font_s
 
 
 # ====
-# División (sin cambios)
+# División
 # ====
+
 
 def dibujar_tabla_division(scrollable_frame, botones_frame, canvas, font_size=16, padding=4):
     class DivisionDialog(simpledialog.Dialog):
         def body(self, master):
-            tk.Label(master, text="Introduce el dividendo:", font=("Arial", font_size)).grid(row=0, column=0, sticky="w", pady=5)
-            tk.Label(master, text="Introduce el divisor:", font=("Arial", font_size)).grid(row=1, column=0, sticky="w", pady=5)
+            tk.Label(master, text="Introduce el dividendo:", font=("Arial", font_size)).grid(
+                row=0, column=0, sticky="w", pady=5
+            )
+            tk.Label(master, text="Introduce el divisor:", font=("Arial", font_size)).grid(
+                row=1, column=0, sticky="w", pady=5
+            )
 
             self.entry_dividendo = tk.Entry(master, font=("Arial", font_size))
             self.entry_divisor = tk.Entry(master, font=("Arial", font_size))
@@ -475,16 +557,24 @@ def dibujar_tabla_division(scrollable_frame, botones_frame, canvas, font_size=16
     columnas = 2
     for i in range(filas):
         content.grid_rowconfigure(i, weight=1)
-    for j in range(columnas):
-        content.grid_columnconfigure(j, weight=1)
-        e = tk.Entry(content, font=("Arial", font_size), justify="center", bd=2, relief="groove")
-        e.grid(row=i, column=j, sticky="nsew", padx=padding, pady=padding)
-        entries[(i, j)] = e
+        for j in range(columnas):
+            content.grid_columnconfigure(j, weight=1)
+            e = tk.Entry(
+                content, font=("Arial", font_size), justify="center", bd=2, relief="groove"
+            )
+            e.grid(row=i, column=j, sticky="nsew", padx=padding, pady=padding)
+            entries[(i, j)] = e
 
-    entries[(0, 0)].insert(0, str(dividendo))
-    entries[(0, 0)].config(state="disabled", disabledbackground="#f0f0f0", disabledforeground="black")
-    entries[(0, 1)].insert(0, str(divisor))
-    entries[(0, 1)].config(state="disabled", disabledbackground="#f0f0f0", disabledforeground="black")
+    if (0, 0) in entries:
+        entries[(0, 0)].insert(0, str(dividendo))
+        entries[(0, 0)].config(
+            state="disabled", disabledbackground="#f0f0f0", disabledforeground="black"
+        )
+    if (0, 1) in entries:
+        entries[(0, 1)].insert(0, str(divisor))
+        entries[(0, 1)].config(
+            state="disabled", disabledbackground="#f0f0f0", disabledforeground="black"
+        )
 
     bloque.update_idletasks()
     canvas.update_idletasks()
@@ -493,8 +583,9 @@ def dibujar_tabla_division(scrollable_frame, botones_frame, canvas, font_size=16
 
 
 # ====
-# Factorial (sin cambios)
+# Factorial
 # ====
+
 
 def contar_filas(numero: int) -> int:
     if numero < 1:
@@ -512,7 +603,9 @@ def contar_filas(numero: int) -> int:
 
 
 def dibujar_tabla_factorial(scrollable_frame, botones_frame, canvas, font_size=16, padding=4):
-    numero = simpledialog.askinteger("Recomposición factorial", "Introduce un número:", parent=scrollable_frame)
+    numero = simpledialog.askinteger(
+        "Recomposición factorial", "Introduce un número:", parent=scrollable_frame
+    )
     if numero is None:
         return
 
@@ -525,13 +618,16 @@ def dibujar_tabla_factorial(scrollable_frame, botones_frame, canvas, font_size=1
     entries = {}
     for i in range(filas):
         content.grid_rowconfigure(i, weight=1)
-    for j in range(2):
-        content.grid_columnconfigure(j, weight=1)
-        e = tk.Entry(content, font=("Arial", font_size), justify="center", bd=2, relief="groove")
-        e.grid(row=i, column=j, sticky="nsew", padx=padding, pady=padding)
-        entries[(i, j)] = e
-    entries[(0, 0)].insert(0, str(numero))
-    entries[(0, 0)].config(state="disabled")
+        for j in range(2):
+            content.grid_columnconfigure(j, weight=1)
+            e = tk.Entry(
+                content, font=("Arial", font_size), justify="center", bd=2, relief="groove"
+            )
+            e.grid(row=i, column=j, sticky="nsew", padx=padding, pady=padding)
+            entries[(i, j)] = e
+    if (0, 0) in entries:
+        entries[(0, 0)].insert(0, str(numero))
+        entries[(0, 0)].config(state="disabled")
 
     bloque.update_idletasks()
     canvas.update_idletasks()
@@ -540,13 +636,18 @@ def dibujar_tabla_factorial(scrollable_frame, botones_frame, canvas, font_size=1
 
 
 # ====
-# Raíz (sin cambios)
+# Raíz
 # ====
+
 
 class RaizDialog(simpledialog.Dialog):
     def body(self, master):
-        tk.Label(master, text="Índice de la raíz:", font=("Arial", 14)).grid(row=0, column=0, sticky="w", pady=5)
-        tk.Label(master, text="Radicando:", font=("Arial", 14)).grid(row=1, column=0, sticky="w", pady=5)
+        tk.Label(master, text="Índice de la raíz:", font=("Arial", 14)).grid(
+            row=0, column=0, sticky="w", pady=5
+        )
+        tk.Label(master, text="Radicando:", font=("Arial", 14)).grid(
+            row=1, column=0, sticky="w", pady=5
+        )
         self.entry_indice = tk.Entry(master, font=("Arial", 14))
         self.entry_radicando = tk.Entry(master, font=("Arial", 14))
         self.entry_indice.grid(row=0, column=1, padx=10, pady=5)
@@ -582,25 +683,34 @@ def dibujar_tabla_raiz(scrollable_frame, botones_frame, canvas, font_size=16, pa
     entries = {}
     for i in range(filas):
         content.grid_rowconfigure(i, weight=1)
-    for j in range(3):
-        content.grid_columnconfigure(j, weight=1)
-        if (i, j) == (0, 0):
-            frame_super = tk.Frame(content, bg="#e0e0e0")
-            frame_super.grid(row=i, column=j, sticky="nsew", padx=padding, pady=padding)
-            label_super = tk.Label(frame_super, text=str(indice), font=("Arial", font_size), bg="#e0e0e0")
-            label_super.place(relx=0.9, rely=0.2, anchor="ne")
-            entries[(i, j)] = frame_super
-        else:
-            e = tk.Entry(content, font=("Arial", font_size), justify="center", bd=2, relief="groove")
-            e.grid(row=i, column=j, sticky="nsew", padx=padding, pady=padding)
-            entries[(i, j)] = e
+        for j in range(3):
+            content.grid_columnconfigure(j, weight=1)
+            if (i, j) == (0, 0):
+                frame_super = tk.Frame(content, bg="#e0e0e0")
+                frame_super.grid(row=i, column=j, sticky="nsew", padx=padding, pady=padding)
+                label_super = tk.Label(
+                    frame_super, text=str(indice), font=("Arial", font_size), bg="#e0e0e0"
+                )
+                label_super.place(relx=0.9, rely=0.2, anchor="ne")
+                entries[(i, j)] = frame_super
+            else:
+                e = tk.Entry(
+                    content, font=("Arial", font_size), justify="center", bd=2, relief="groove"
+                )
+                e.grid(row=i, column=j, sticky="nsew", padx=padding, pady=padding)
+                entries[(i, j)] = e
 
     for i in range(1, filas):
-        if isinstance(entries[(i, 0)], tk.Entry):
-            entries[(i, 0)].config(state="disabled", disabledbackground="#e0e0e0", disabledforeground="black")
+        if isinstance(entries[(i, 0)], tk.Entry) and (i, 0) in entries:
+            entries[(i, 0)].config(
+                state="disabled", disabledbackground="#e0e0e0", disabledforeground="black"
+            )
 
-    entries[(0, 1)].insert(0, str(radicando))
-    entries[(0, 1)].config(state="disabled", disabledbackground="#f0f0f0", disabledforeground="black")
+    if (0, 1) in entries:
+        entries[(0, 1)].insert(0, str(radicando))
+        entries[(0, 1)].config(
+            state="disabled", disabledbackground="#f0f0f0", disabledforeground="black"
+        )
 
     bloque.update_idletasks()
     canvas.update_idletasks()
@@ -609,11 +719,14 @@ def dibujar_tabla_raiz(scrollable_frame, botones_frame, canvas, font_size=16, pa
 
 
 # ====
-# Binario (sin cambios)
+# Binario
 # ====
 
+
 def dibujar_tabla_binaria(scrollable_frame, botones_frame, canvas, font_size=16, padding=4):
-    numero_str = simpledialog.askstring("Código binario", "Introduce un número:", parent=scrollable_frame)
+    numero_str = simpledialog.askstring(
+        "Código binario", "Introduce un número:", parent=scrollable_frame
+    )
     if not numero_str:
         return
     try:
@@ -650,14 +763,16 @@ def dibujar_tabla_binaria(scrollable_frame, botones_frame, canvas, font_size=16,
 
     for i in range(filas):
         content.grid_rowconfigure(i, weight=1)
-    for j in range(columnas):
-        content.grid_columnconfigure(j, weight=1)
-        e = tk.Entry(content, font=("Arial", font_size), justify="center", bd=2, relief="groove")
-        e.grid(row=i, column=j, sticky="nsew", padx=padding, pady=padding)
-        entries[(i, j)] = e
-        if (i, j) in fixed:
-            e.insert(0, fixed[(i, j)])
-            e.config(state="disabled")
+        for j in range(columnas):
+            content.grid_columnconfigure(j, weight=1)
+            e = tk.Entry(
+                content, font=("Arial", font_size), justify="center", bd=2, relief="groove"
+            )
+            e.grid(row=i, column=j, sticky="nsew", padx=padding, pady=padding)
+            entries[(i, j)] = e
+            if (i, j) in fixed:
+                e.insert(0, fixed[(i, j)])
+                e.config(state="disabled")
 
     bloque.update_idletasks()
     canvas.update_idletasks()
